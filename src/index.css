@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Override Leaflet z-index so it stays below modals */
+.leaflet-pane { z-index: 10; }
+.leaflet-control { z-index: 20; }
+.leaflet-top, .leaflet-bottom { z-index: 20; }

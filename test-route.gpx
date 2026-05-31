@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>Brussels Test Route</name>
+    <trkseg>
+      <trkpt lat="50.8503" lon="4.3517"></trkpt>
+      <trkpt lat="50.8510" lon="4.3530"></trkpt>
+      <trkpt lat="50.8520" lon="4.3545"></trkpt>
+      <trkpt lat="50.8530" lon="4.3560"></trkpt>
+      <trkpt lat="50.8540" lon="4.3575"></trkpt>
+      <trkpt lat="50.8550" lon="4.3590"></trkpt>
+      <trkpt lat="50.8560" lon="4.3605"></trkpt>
+      <trkpt lat="50.8570" lon="4.3590"></trkpt>
+      <trkpt lat="50.8580" lon="4.3575"></trkpt>
+      <trkpt lat="50.8590" lon="4.3560"></trkpt>
+      <trkpt lat="50.8600" lon="4.3545"></trkpt>
+      <trkpt lat="50.8610" lon="4.3530"></trkpt>
+      <trkpt lat="50.8620" lon="4.3515"></trkpt>
+      <trkpt lat="50.8630" lon="4.3500"></trkpt>
+      <trkpt lat="50.8640" lon="4.3485"></trkpt>
+      <trkpt lat="50.8650" lon="4.3470"></trkpt>
+      <trkpt lat="50.8640" lon="4.3455"></trkpt>
+      <trkpt lat="50.8630" lon="4.3440"></trkpt>
+      <trkpt lat="50.8620" lon="4.3425"></trkpt>
+      <trkpt lat="50.8610" lon="4.3410"></trkpt>
+      <trkpt lat="50.8600" lon="4.3395"></trkpt>
+      <trkpt lat="50.8590" lon="4.3380"></trkpt>
+      <trkpt lat="50.8580" lon="4.3365"></trkpt>
+      <trkpt lat="50.8570" lon="4.3350"></trkpt>
+      <trkpt lat="50.8560" lon="4.3335"></trkpt>
+      <trkpt lat="50.8550" lon="4.3320"></trkpt>
+      <trkpt lat="50.8540" lon="4.3335"></trkpt>
+      <trkpt lat="50.8530" lon="4.3350"></trkpt>
+      <trkpt lat="50.8520" lon="4.3365"></trkpt>
+      <trkpt lat="50.8510" lon="4.3380"></trkpt>
+      <trkpt lat="50.8503" lon="4.3395"></trkpt>
+    </trkseg>
+  </trk>
+</gpx>
