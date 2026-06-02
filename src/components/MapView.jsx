@@ -151,6 +151,18 @@ function createNoImageIcon() {
   });
 }
 
+function createLoopStartIcon() {
+  return L.divIcon({
+    className: '',
+    iconSize: [30, 38],
+    iconAnchor: [15, 38],
+    html: `<svg width="30" height="38" xmlns="http://www.w3.org/2000/svg">
+      <path d="M15 1 C7 1 1 7 1 15 C1 25 15 37 15 37 C15 37 29 25 29 15 C29 7 23 1 15 1 Z" fill="#2563eb" stroke="white" stroke-width="2"/>
+      <circle cx="15" cy="15" r="5" fill="white"/>
+    </svg>`,
+  });
+}
+
 function createExploreIcon(heading) {
   return L.divIcon({
     className: '',
@@ -197,6 +209,20 @@ function createWaypointIcon(index, isFirst, isLast) {
       <circle cx="14" cy="14" r="11" fill="${color}" stroke="white" stroke-width="2"/>
       <text x="14" y="19" text-anchor="middle" font-size="11" fill="white" font-weight="bold">${index + 1}</text>
     </svg>`,
+  });
+}
+
+// Herkenbaar icoon voor een eetstop-waypoint: emoji in een gekleurde pin,
+// duidelijk verschillend van de genummerde route-waypoints.
+function createVenueWaypointIcon(emoji, color = '#f59e0b') {
+  return L.divIcon({
+    className: '',
+    iconSize: [34, 42],
+    iconAnchor: [17, 42],
+    html: `<div style="position:relative;width:34px;height:42px;">
+      <div style="position:absolute;top:0;left:2px;width:30px;height:30px;background:${color};border:2.5px solid white;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 2px 5px rgba(0,0,0,0.35);"></div>
+      <div style="position:absolute;top:4px;left:2px;width:30px;height:28px;display:flex;align-items:center;justify-content:center;font-size:15px;">${emoji || '🍽️'}</div>
+    </div>`,
   });
 }
 
@@ -259,7 +285,7 @@ function FitBoundsOnLoad({ points }) {
 }
 
 const MapView = forwardRef(function MapView(
-  { gpxPoints, segments, config, onSelectPoint, flyTarget, onMapClick, explorePoint, badStreets, onToggleBadStreet, amenities, selectedAmenity, onAmenityClick, routeEditMode, editWaypoints, editSegments, onInsertWaypoint, onMoveWaypoint, onRemoveWaypoint, overlayPoints },
+  { gpxPoints, segments, config, onSelectPoint, flyTarget, onMapClick, explorePoint, badStreets, onToggleBadStreet, amenities, selectedAmenity, onAmenityClick, routeEditMode, editWaypoints, editSegments, onInsertWaypoint, onMoveWaypoint, onRemoveWaypoint, overlayPoints, loopStart, pickingLoopStart },
   ref
 ) {
   const mapRef = useRef(null);
@@ -456,16 +482,28 @@ const MapView = forwardRef(function MapView(
           key={wp.id}
           position={[wp.lat, wp.lng]}
           draggable={true}
-          icon={createWaypointIcon(i, i === 0, i === editWaypoints.length - 1)}
+          icon={wp.venue ? createVenueWaypointIcon(wp.venue.emoji, wp.venue.color) : createWaypointIcon(i, i === 0, i === editWaypoints.length - 1)}
+          zIndexOffset={wp.venue ? 1000 : 0}
           eventHandlers={{
             dragend: (e) => onMoveWaypoint?.(wp.id, e.target.getLatLng()),
           }}
         >
           <Popup minWidth={120} closeButton={false}>
             <div style={{ textAlign: 'center', padding: '2px 0' }}>
-              <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '6px', fontWeight: 500 }}>
-                Waypoint {i + 1}
-              </div>
+              {wp.venue ? (
+                <div style={{ marginBottom: '6px' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>
+                    {wp.venue.emoji} {wp.venue.name || 'Eetstop'}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>
+                    {wp.venue.typeLabel}{wp.venue.address ? ` · ${wp.venue.address}` : ''}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '6px', fontWeight: 500 }}>
+                  Waypoint {i + 1}
+                </div>
+              )}
               <button
                 onClick={(e) => { e.stopPropagation(); onRemoveWaypoint?.(wp.id); }}
                 style={{
@@ -489,7 +527,12 @@ const MapView = forwardRef(function MapView(
       {flyTarget && <FlyToController target={flyTarget} />}
       {/* In normale modus én draw-modus klikken afhandelen; in edit-modus NIET (klikken op segment = waypoint invoegen) */}
       {onMapClick && routeEditMode !== 'edit' && <MapClickHandler onClick={onMapClick} />}
-      {routeEditMode && <MapCursorController mode={routeEditMode} />}
+      {(routeEditMode || pickingLoopStart) && <MapCursorController mode={routeEditMode || pickingLoopStart} />}
+
+      {/* Startpunt voor de lus-generator (verborgen tijdens bewerken; waypoints nemen over) */}
+      {loopStart && !routeEditMode && (
+        <Marker position={[loopStart.lat, loopStart.lng]} icon={createLoopStartIcon()} interactive={false} />
+      )}
 
       {explorePoint && (() => {
         const exploreOffset = getOffset(buildCacheKey(explorePoint, 0));

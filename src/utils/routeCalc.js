@@ -307,6 +307,55 @@ export async function calculateFullRoute(waypoints, mode = ROUTING_MODES.ROADS, 
 }
 
 /**
+ * Berekent een gesloten lus door alle `anchors` en terug naar het eerste punt,
+ * in één BRouter-aanroep. Geeft per-segment-geometrie terug (één segment per edge
+ * van de gesloten lus, inclusief de terugweg naar de start) plus de samengevoegde
+ * puntenlijst en de totale lengte.
+ *
+ * Geeft `null` terug als de routing faalt — zo kan de aanroeper een mislukte lus
+ * detecteren i.p.v. (zoals `calculateSegment`) stilletjes op een rechte lijn terug
+ * te vallen en een onjuiste afstand te meten.
+ *
+ * @param {{lat:number,lng:number}[]} anchors - open ankerlijst (niet gesloten)
+ * @param {string} [mode='roads']
+ * @param {{avoid?: string[]}} [opts]
+ * @returns {Promise<{ points: {lat,lng}[], segments: {lat,lng}[][], distanceM: number }|null>}
+ */
+export async function calculateLoopRoute(anchors, mode = ROUTING_MODES.ROADS, opts = {}) {
+  if (anchors.length < 2) return null;
+  const closed = [...anchors, anchors[0]]; // sluit de lus
+
+  if (mode === ROUTING_MODES.CUSTOM) {
+    const segments = [];
+    for (let i = 0; i < closed.length - 1; i++) segments.push([closed[i], closed[i + 1]]);
+    const points = [closed[0], ...segments.map((s) => s[1])];
+    return { points, segments, distanceM: routeLength(points) };
+  }
+
+  const lonlats = closed.map((p) => `${p.lng},${p.lat}`).join('|');
+  const features = await fetchBrouterFeatures(lonlats, mode, opts);
+  if (!features) return null; // routing mislukt — geen rechte-lijn-fallback
+
+  // Voeg alle features samen tot één puntenlijst …
+  const points = [];
+  features.forEach((f, i) => {
+    const pts = f.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
+    if (i === 0) points.push(...pts);
+    else points.push(...pts.slice(1));
+  });
+  // … en deel die opnieuw in per anker-edge (robuust of BRouter nu één feature per
+  // segment of één samengevoegde feature teruggeeft).
+  const segments = splitRouteIntoSegments(points, closed);
+  return { points, segments, distanceM: routeLength(points) };
+}
+
+function routeLength(points) {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += haversine(points[i - 1], points[i]);
+  return total;
+}
+
+/**
  * Splitst een bestaand segment geometrisch op bij een nieuw ingevoegd waypoint.
  * Er wordt geen routing-API aangeroepen: de bestaande puntarray wordt opgedeeld
  * op de edge die het dichtst bij `newPoint` ligt.
