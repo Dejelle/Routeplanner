@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback, forwardRef, useImperativeHandle } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -185,6 +185,116 @@ function FlyToController({ target }) {
   return null;
 }
 
+function AddressSearch() {
+  const map = useMap();
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const debounceRef = useRef(null);
+  const inputRef = useRef(null);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (containerRef.current) {
+      L.DomEvent.disableClickPropagation(containerRef.current);
+      L.DomEvent.disableScrollPropagation(containerRef.current);
+    }
+  }, []);
+
+  const search = useCallback((q) => {
+    if (!q.trim()) { setResults([]); setOpen(false); return; }
+    setLoading(true);
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=6&addressdetails=1`, {
+      headers: { 'Accept-Language': 'nl' },
+    })
+      .then((r) => r.json())
+      .then((data) => { setResults(data); setOpen(data.length > 0); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleInput = (e) => {
+    const q = e.target.value;
+    setQuery(q);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => search(q), 400);
+  };
+
+  const handleSelect = (result) => {
+    map.flyTo([parseFloat(result.lat), parseFloat(result.lon)], 17, { duration: 1.2 });
+    setQuery(result.display_name.split(',').slice(0, 2).join(', '));
+    setOpen(false);
+    setResults([]);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') { setOpen(false); inputRef.current?.blur(); }
+    if (e.key === 'Enter' && results.length > 0) handleSelect(results[0]);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 1000, width: 340, maxWidth: 'calc(100vw - 80px)' }}
+    >
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+        <svg style={{ position: 'absolute', left: 10, pointerEvents: 'none', flexShrink: 0 }} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={handleInput}
+          onKeyDown={handleKeyDown}
+          onFocus={() => results.length > 0 && setOpen(true)}
+          placeholder="Zoek een adres…"
+          style={{
+            width: '100%',
+            padding: '9px 36px 9px 34px',
+            fontSize: 14,
+            borderRadius: open ? '10px 10px 0 0' : 10,
+            border: '1px solid rgba(0,0,0,0.18)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+            outline: 'none',
+            background: 'white',
+            color: '#1f2937',
+          }}
+        />
+        {loading && (
+          <div style={{ position: 'absolute', right: 10, width: 14, height: 14, border: '2px solid #d1d5db', borderTop: '2px solid #3b82f6', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+        )}
+        {!loading && query && (
+          <button
+            onClick={() => { setQuery(''); setResults([]); setOpen(false); inputRef.current?.focus(); }}
+            style={{ position: 'absolute', right: 8, background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: 2, display: 'flex' }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        )}
+      </div>
+      {open && (
+        <ul style={{ margin: 0, padding: 0, listStyle: 'none', background: 'white', border: '1px solid rgba(0,0,0,0.18)', borderTop: 'none', borderRadius: '0 0 10px 10px', boxShadow: '0 4px 12px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
+          {results.map((r) => (
+            <li
+              key={r.place_id}
+              onClick={() => handleSelect(r)}
+              style={{ padding: '9px 14px', fontSize: 13, color: '#1f2937', cursor: 'pointer', borderTop: '1px solid #f1f5f9', lineHeight: 1.4 }}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#f0f9ff'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'white'}
+            >
+              <span style={{ fontWeight: 500 }}>{r.display_name.split(',')[0]}</span>
+              <span style={{ color: '#6b7280', marginLeft: 4 }}>{r.display_name.split(',').slice(1, 3).join(',')}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
 function MapClickHandler({ onClick }) {
   useMapEvents({ click: (e) => onClick({ lat: e.latlng.lat, lng: e.latlng.lng }) });
   return null;
@@ -324,7 +434,7 @@ const MapView = forwardRef(function MapView(
   return (
     <div className="relative h-full w-full">
     <MapContainer
-      center={[50.85, 4.35]}
+      center={[51.194, 4.432]}
       zoom={13}
       className="h-full w-full"
       ref={mapRef}
@@ -524,6 +634,7 @@ const MapView = forwardRef(function MapView(
         </Marker>
       ))}
 
+      <AddressSearch />
       {flyTarget && <FlyToController target={flyTarget} />}
       {/* In normale modus én draw-modus klikken afhandelen; in edit-modus NIET (klikken op segment = waypoint invoegen) */}
       {onMapClick && routeEditMode !== 'edit' && <MapClickHandler onClick={onMapClick} />}
