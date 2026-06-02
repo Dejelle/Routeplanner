@@ -25,6 +25,8 @@ import { matchRouteToRoads } from './utils/mapMatching.js';
 import { calculateSegment, calculateSegmentsThroughWaypoint, extractWaypointsFromRoute, splitRouteIntoSegments, splitSegmentAtPoint, mergeSegments, ROUTING_MODES, CYCLE_INFRA_TYPES, prewarmRoutingMode } from './utils/routeCalc.js';
 import RouteEditorToolbar from './components/RouteEditorToolbar.jsx';
 import FinalizeRouteModal from './components/FinalizeRouteModal.jsx';
+import LoopGeneratorPanel from './components/LoopGeneratorPanel.jsx';
+import { generateLoop } from './utils/loopGenerator.js';
 
 export default function App() {
   const [gpxPoints, setGpxPoints] = useState([]);
@@ -66,6 +68,17 @@ export default function App() {
 
   const toggleCycleAvoid = useCallback((key) => {
     setCycleAvoid((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  }, []);
+
+  // ── Lus-generator state ───────────────────────────────────────────────────
+  const [loopStart, setLoopStart] = useState(null);          // {lat,lng} | null
+  const [pickingLoopStart, setPickingLoopStart] = useState(false);
+  const [isGeneratingLoop, setIsGeneratingLoop] = useState(false);
+  const [loopStatus, setLoopStatus] = useState('');
+  const [loopError, setLoopError] = useState(null);
+
+  const handleTogglePickLoopStart = useCallback(() => {
+    setPickingLoopStart((p) => !p);
   }, []);
 
   const dragTimersRef = useRef({});       // debounce per waypoint-id
@@ -215,6 +228,39 @@ export default function App() {
     setEditSegments(segs);
     setRouteEditMode('edit');
   }, [gpxPoints]);
+
+  const handleGenerateLoop = useCallback(async ({ targetDistanceM, bearingDeg, venue }) => {
+    if (!loopStart) return;
+    setIsGeneratingLoop(true);
+    setLoopError(null);
+    setLoopStatus('');
+    try {
+      const result = await generateLoop({
+        start: loopStart,
+        targetDistanceM,
+        bearingDeg,
+        mode: routingMode,
+        avoid: cycleAvoid,
+        venue,
+        onProgress: setLoopStatus,
+      });
+      // Gesloten waypoint-lijst: ankers + kopie van de start als sluitpunt, zodat
+      // het in het bestaande edit-model (n waypoints → n-1 segmenten) past.
+      const wps = result.anchors.map((p) => ({ id: crypto.randomUUID(), lat: p.lat, lng: p.lng, venue: p.venue || null }));
+      wps.push({ id: crypto.randomUUID(), lat: result.anchors[0].lat, lng: result.anchors[0].lng });
+      setEditWaypoints(wps);
+      setEditSegments(result.segments);
+      setRouteName('Gegenereerde lus');
+      setRouteEditMode('edit');
+      setPickingLoopStart(false);
+      if (result.warning) setLoopError(result.warning); // niet-blokkerende info
+    } catch (e) {
+      setLoopError(e.message || 'Genereren mislukt.');
+    } finally {
+      setIsGeneratingLoop(false);
+      setLoopStatus('');
+    }
+  }, [loopStart, routingMode, cycleAvoid]);
 
   const handleAddWaypoint = useCallback((latlng) => {
     const wp = { id: crypto.randomUUID(), lat: latlng.lat, lng: latlng.lng };
@@ -391,6 +437,11 @@ export default function App() {
   }, [finalizePrompt, finishEditing]);
 
   const handleMapClick = useCallback((latlng) => {
+    if (pickingLoopStart) {
+      setLoopStart({ lat: latlng.lat, lng: latlng.lng });
+      setPickingLoopStart(false);
+      return;
+    }
     if (routeEditMode === 'draw' || routeEditMode === 'edit') {
       // In edit-modus: klik op lege kaart verlengt de route vanaf het eindpunt
       handleAddWaypoint(latlng);
@@ -398,7 +449,7 @@ export default function App() {
     }
     setExplorePoint(latlng);
     setActiveTab('explore');
-  }, [routeEditMode, handleAddWaypoint]);
+  }, [pickingLoopStart, routeEditMode, handleAddWaypoint]);
 
   const handleAmenitySelect = useCallback((amenity) => {
     setSelectedAmenity(amenity);
@@ -693,6 +744,8 @@ export default function App() {
             onMoveWaypoint={handleMoveWaypoint}
             onRemoveWaypoint={handleRemoveWaypoint}
             overlayPoints={overlayPoints}
+            loopStart={loopStart}
+            pickingLoopStart={pickingLoopStart}
           />
           {routeEditMode && (
             <RouteEditorToolbar
@@ -747,6 +800,22 @@ export default function App() {
                   onVisibleChange={setVisibleAmenities}
                 />
               )}
+              {activeTab === 'loop' && (
+                <LoopGeneratorPanel
+                  routingMode={routingMode}
+                  onChangeRoutingMode={setRoutingMode}
+                  cycleInfraTypes={CYCLE_INFRA_TYPES}
+                  cycleAvoid={cycleAvoid}
+                  onToggleCycleAvoid={toggleCycleAvoid}
+                  loopStart={loopStart}
+                  pickingStart={pickingLoopStart}
+                  onTogglePickStart={handleTogglePickLoopStart}
+                  onGenerate={handleGenerateLoop}
+                  isGenerating={isGeneratingLoop}
+                  status={loopStatus}
+                  error={loopError}
+                />
+              )}
             </div>
           )}
 
@@ -754,6 +823,7 @@ export default function App() {
           <div className="flex flex-col border-l border-slate-200 bg-white w-10">
             <TabButton id="route" icon="🗺" label="Route" active={activeTab === 'route'} onClick={handleTabClick} />
             <TabButton id="explore" icon="🔍" label="Verkennen" active={activeTab === 'explore'} onClick={handleTabClick} />
+            <TabButton id="loop" icon="🔄" label="Genereer lus" active={activeTab === 'loop'} onClick={handleTabClick} />
             {gpxPoints.length > 0 && (
               <TabButton id="amenities" icon="🍽️" label="Eetgelegenheden" active={activeTab === 'amenities'} onClick={handleTabClick} />
             )}

@@ -5,9 +5,9 @@ const ENDPOINTS = [
   'https://overpass.openstreetmap.ru/api/interpreter',
 ];
 
-async function tryFetch(endpoint, body) {
+async function tryFetch(endpoint, body, timeoutMs = 20000) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000); // 20s per endpoint
+  const timer = setTimeout(() => controller.abort(), timeoutMs); // per endpoint
   try {
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -45,6 +45,37 @@ export async function fetchWayAtPoint(lat, lng) {
     }
   }
   return null;
+}
+
+/**
+ * Haalt bruikbare (fietsbare) ways op binnen een bbox, voor het snappen van
+ * kandidaat-waypoints bij de lus-generator. Anders dan `fetchRoads` wordt hier
+ * GEEN naam-tag vereist: veel fietspaden (highway=cycleway/path) hebben geen
+ * naam en moeten juist als snap-doel meetellen. Autosnelwegen/trunk en
+ * expliciet verboden toegang worden uitgesloten.
+ *
+ * @param {{minLat,minLng,maxLat,maxLng}} bbox
+ * @returns {Promise<Array>} OSM way-objecten met .geometry ([{lat,lon}]) en .tags
+ */
+export async function fetchBikeableWays(bbox) {
+  const { minLat, minLng, maxLat, maxLng } = bbox;
+  const query = `[out:json][timeout:60];way["highway"]["highway"!~"^(motorway|motorway_link|trunk|trunk_link|construction|proposed|raceway)$"]["bicycle"!~"^(no|private|dismount)$"]["access"!~"^(no|private)$"](${minLat},${minLng},${maxLat},${maxLng});out geom;`;
+  const body = 'data=' + encodeURIComponent(query);
+
+  let lastError;
+  for (const endpoint of ENDPOINTS) {
+    try {
+      // Zwaardere query (groot gebied, geen naam-filter) → ruimere client-timeout
+      // zodat de 60s server-budget niet voortijdig wordt afgebroken.
+      const res = await tryFetch(endpoint, body, 50000);
+      const data = await res.json();
+      return data.elements.filter((el) => el.type === 'way' && el.geometry && el.geometry.length >= 2);
+    } catch (err) {
+      console.warn(`[Overpass bikeable] ${endpoint} failed:`, err.message);
+      lastError = err;
+    }
+  }
+  throw new Error(`All Overpass mirrors failed. Last error: ${lastError?.message}`);
 }
 
 export async function fetchRoads(bbox) {

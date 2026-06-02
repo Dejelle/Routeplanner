@@ -74,27 +74,29 @@ function minDistanceToRoute(point, routePoints) {
   return min;
 }
 
-export async function fetchAmenities(gpxPoints, maxDistance) {
+/**
+ * @param {{lat,lng}[]} gpxPoints
+ * @param {number} maxDistance - corridorbreedte in meters
+ * @param {string[]|null} [typeKeys] - beperk tot deze type-keys (null = alle types)
+ */
+export async function fetchAmenities(gpxPoints, maxDistance, typeKeys = null) {
   // Subsample route at 50m for accurate distance checks without excessive computation
   const sampled = subsampleRoute(gpxPoints, 50);
 
   const bbox = buildBbox(sampled, maxDistance);
   const { minLat, minLng, maxLat, maxLng } = bbox;
 
-  const amenityValues = AMENITY_TYPES.filter((t) => t.tag === 'amenity').map((t) => t.key);
-  const shopValues    = AMENITY_TYPES.filter((t) => t.tag === 'shop').map((t) => t.key);
-  const tourismValues = AMENITY_TYPES.filter((t) => t.tag === 'tourism').map((t) => t.key);
-  const leisureValues = AMENITY_TYPES.filter((t) => t.tag === 'leisure').map((t) => t.key);
+  const wanted = typeKeys ? new Set(typeKeys) : null;
+  const pool = wanted ? AMENITY_TYPES.filter((t) => wanted.has(t.key)) : AMENITY_TYPES;
+  const valuesFor = (tag) => [...new Set(pool.filter((t) => t.tag === tag).map((t) => t.key))];
 
   const bboxStr = `${minLat},${minLng},${maxLat},${maxLng}`;
-  const query = `[out:json][timeout:30];
-(
-  node["amenity"~"${[...new Set(amenityValues)].join('|')}"](${bboxStr});
-  node["shop"~"${shopValues.join('|')}"](${bboxStr});
-  node["tourism"~"${tourismValues.join('|')}"](${bboxStr});
-  node["leisure"~"${leisureValues.join('|')}"](${bboxStr});
-);
-out body;`;
+  const clauses = ['amenity', 'shop', 'tourism', 'leisure']
+    .map((tag) => ({ tag, keys: valuesFor(tag) }))
+    .filter(({ keys }) => keys.length)
+    .map(({ tag, keys }) => `  node["${tag}"~"^(${keys.join('|')})$"](${bboxStr});`)
+    .join('\n');
+  const query = `[out:json][timeout:30];\n(\n${clauses}\n);\nout body;`;
 
   const body = 'data=' + encodeURIComponent(query);
 
@@ -112,6 +114,7 @@ out body;`;
         const typeKey = tags.amenity || tags.shop || tags.tourism || tags.leisure;
         const typeDef = TYPE_MAP[typeKey];
         if (!typeDef) continue;
+        if (wanted && !wanted.has(typeKey)) continue;
 
         const point = { lat: el.lat, lng: el.lon };
         const dist = minDistanceToRoute(point, sampled);
