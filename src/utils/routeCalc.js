@@ -337,16 +337,137 @@ export async function calculateLoopRoute(anchors, mode = ROUTING_MODES.ROADS, op
   if (!features) return null; // routing mislukt — geen rechte-lijn-fallback
 
   // Voeg alle features samen tot één puntenlijst …
-  const points = [];
+  const merged = [];
   features.forEach((f, i) => {
     const pts = f.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
-    if (i === 0) points.push(...pts);
-    else points.push(...pts.slice(1));
+    if (i === 0) merged.push(...pts);
+    else merged.push(...pts.slice(1));
   });
-  // … en deel die opnieuw in per anker-edge (robuust of BRouter nu één feature per
-  // segment of één samengevoegde feature teruggeeft).
-  const segments = splitRouteIntoSegments(points, closed);
+  // … deel die opnieuw in per anker-edge (robuust of BRouter nu één feature per
+  // segment of één samengevoegde feature teruggeeft) …
+  const rawSegments = splitRouteIntoSegments(merged, closed);
+  // … en knip de "staartjes" weg: rond een anker delen de route ernaartoe en ervan-
+  //   daan soms hetzelfde wegstuk (heen-en-weer), wat een doodlopende stub tekent.
+  const segments = removeAnchorOverlaps(rawSegments);
+
+  // Puntenlijst herbouwen uit de getrimde segmenten (dubbel koppelpunt overslaan).
+  const points = [];
+  segments.forEach((seg, i) => {
+    if (i === 0) points.push(...seg);
+    else points.push(...seg.slice(1));
+  });
   return { points, segments, distanceM: routeLength(points) };
+}
+
+// Maximale loodrechte afstand (m) waarbinnen de uitgaande tak nog als "teruggelegd
+// over de inkomende tak" geldt. Ruim genoeg voor een net andere parallelle weg of een
+// afwijkende puntdichtheid op heen- en terugweg, maar klein genoeg om geen echte bocht
+// weg te knippen.
+const SPUR_EPS_M = 15;
+// Hoeveel inkomende edges we per stap achterwaarts doorzoeken (vangt verschil in
+// puntdichtheid tussen heen- en terugweg op).
+const SPUR_LOOKBACK = 6;
+
+// Loodrechte afstand (m) van punt p tot het lijnstuk a–b, plus de projectieparameter
+// t ∈ [0,1] langs a→b. Lokale equirectangulaire projectie met p als oorsprong.
+function pointSegInfo(p, a, b) {
+  const R = 6371000;
+  const cos = Math.cos((p.lat * Math.PI) / 180);
+  const toXY = (q) => ({
+    x: ((q.lng - p.lng) * Math.PI) / 180 * R * cos,
+    y: ((q.lat - p.lat) * Math.PI) / 180 * R,
+  });
+  const A = toXY(a);
+  const B = toXY(b);
+  const dx = B.x - A.x;
+  const dy = B.y - A.y;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 > 0 ? (-A.x * dx - A.y * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = A.x + t * dx;
+  const cy = A.y + t * dy;
+  return { dist: Math.hypot(cx, cy), t };
+}
+
+/**
+ * Verwijdert "staartjes" (heen-en-weer stubs) rond de ankers van een gesloten lus.
+ *
+ * Bij een via-anker kan de goedkoopste route ernaartoe en de goedkoopste route ervandaan
+ * deels hetzelfde wegstuk delen. Dat tekent als een doodlopend uitstapje. Per anker-
+ * overgang volgen we hoe ver de uitgaande tak de inkomende tak achterstevoren terugvolgt
+ * — gemeten als loodrechte afstand tot de inkomende polylijn, zodat ongelijke
+ * puntdichtheid of een licht andere parallelle weg het niet breekt — en knippen dat stuk
+ * weg, zodat de route gewoon door het divergentiepunt loopt.
+ *
+ * Bewust NIET cyclisch: de sluit-overgang (laatste ↔ eerste segment) deelt het
+ * startpunt, en een korte heen-en-weer aan de start is gewenst (je vertrekt en keert
+ * terug op hetzelfde punt). Die overgang laten we dus met rust. Een segment houdt altijd
+ * ≥ 2 punten over.
+ *
+ * @param {{lat:number,lng:number}[][]} segments - segmenten van de gesloten lus
+ * @returns {{lat:number,lng:number}[][]}
+ */
+export function removeAnchorOverlaps(segments) {
+  if (segments.length < 2) return segments;
+  const segs = segments.map((s) => [...s]); // niet muteren
+
+  // Alleen interne anker-overgangen: einde van segs[s] sluit aan op begin van segs[s+1].
+  // De sluit-overgang (s = n-1 → segs[0]) bij het startpunt slaan we over.
+  for (let s = 0; s < segs.length - 1; s++) {
+    const segIn = segs[s];
+    const segOut = segs[s + 1];
+    if (segIn.length < 2 || segOut.length < 2) continue;
+
+    // `frontier` = inkomende edge-index (onderste vertex) waar we momenteel zitten;
+    // loopt vanaf de laatste edge enkel achterwaarts terwijl de terugweg overlapt.
+    let frontier = segIn.length - 2;
+    let cut = 0;        // tot welke segOut-index de overlap reikt
+    let cutEdge = -1;   // inkomende edge waar segOut[cut] op projecteert (divergentie)
+    let cutT = 0;       // projectieparameter op die edge
+    for (let j = 1; j < segOut.length; j++) {
+      const lo = Math.max(0, frontier - SPUR_LOOKBACK);
+      let bestD = Infinity;
+      let bestEdge = -1;
+      let bestT = 0;
+      for (let e = frontier; e >= lo; e--) {
+        const { dist, t } = pointSegInfo(segOut[j], segIn[e], segIn[e + 1]);
+        if (dist < bestD) { bestD = dist; bestEdge = e; bestT = t; }
+      }
+      if (bestD <= SPUR_EPS_M && bestEdge >= 0) {
+        frontier = bestEdge; // alleen achterwaarts (search ≤ frontier)
+        cut = j;
+        cutEdge = bestEdge;
+        cutT = bestT;
+      } else {
+        break;
+      }
+    }
+
+    // Geen overlap, of de overlap beslaat (bijna) heel segOut → laat ongemoeid.
+    if (cut < 1 || cut > segOut.length - 2) continue;
+
+    // Inkomende tak inkorten tot het divergentiepunt; uitgaande tak vanaf cut.
+    // Belangrijk: beide takken moeten exact hetzelfde knooppunt delen (laatste punt van
+    // segIn === eerste punt van segOut), anders ontstaat een gat — de rest van de code
+    // (samenvoegen, GPX-export, per-segment rendering) rekent op die invariant.
+    const a = segIn[cutEdge];
+    const b = segIn[cutEdge + 1];
+    const newIn = segIn.slice(0, cutEdge + 1);
+    if (cutT > 1e-9) {
+      newIn.push({
+        lat: a.lat + cutT * (b.lat - a.lat),
+        lng: a.lng + cutT * (b.lng - a.lng),
+      });
+    }
+    const junction = newIn[newIn.length - 1];
+    const newOut = [junction, ...segOut.slice(cut + 1)];
+    if (newIn.length >= 2 && newOut.length >= 2) {
+      segs[s] = newIn;
+      segs[s + 1] = newOut;
+    }
+  }
+
+  return segs;
 }
 
 function routeLength(points) {
